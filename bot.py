@@ -1063,8 +1063,8 @@ def main():
     application.add_handler(CommandHandler("users", users_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("blockedports", blocked_ports_command))
-application.add_handler(CommandHandler("setcooldown", setcooldown_command))
     # User commands
+    
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("attack", attack_command))
     application.add_handler(CommandHandler("myattacks", myattacks_command))
