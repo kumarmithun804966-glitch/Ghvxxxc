@@ -19,6 +19,9 @@ import html
 import uuid
 import os
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
+
+
 
 # Configure logging
 logging.basicConfig(
@@ -35,7 +38,7 @@ MONGODB_URI = os.getenv("MONGODB_URI")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "attack_bot")
 API_URL = os.getenv("API_URL")
 API_KEY = os.getenv("API_KEY")
-ADMIN_IDS = [int(id.strip()) for id in os.getenv("ADMIN_IDS", "1793697840").split(",")]
+ADMIN_IDS = [int(id.strip()) for id in os.getenv("ADMIN_IDS", "6247257907").split(",")]
 
 # Blocked ports (must match backend)
 BLOCKED_PORTS = {8700, 20000, 443, 17500, 9031, 20002, 20001}
@@ -43,6 +46,14 @@ BLOCKED_PORTS = {8700, 20000, 443, 17500, 9031, 20002, 20001}
 # Allowed port range
 MIN_PORT = 1
 MAX_PORT = 65535
+GLOBAL_COOLDOWN = 60  # default cooldown in seconds
+user_last_attack: Dict[int, datetime] = {}
+
+
+
+
+
+
 
 # Helper function to make datetime timezone-aware
 def make_aware(dt):
@@ -654,8 +665,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message = (
                 f"❌ Access Denied, {username or user_id}!\n\n"
                 f"Your account is not approved yet.\n"
-                f"Please contact the administrator to get access.\n\n"
-                f"OWNER BY @BGMISTORE95 /help"
+                f"Please contact administrator @BGMISTORE95.\n"
+                f"JOIN CHANEL https://t.me/+OTAU6ZwNT9BjMDc9.\n"
+                f"all command /HELP."
             )
         
         await update.message.reply_text(message)
@@ -668,103 +680,99 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import CallbackQueryHandler
-from datetime import datetime
-
-# ===== CONFIG =====
-COOLDOWN_TIME = 60
-user_cooldowns = {}
-
-# ===== COOLDOWN FUNCTION =====
-def check_cooldown(user_id, command, cooldown=COOLDOWN_TIME):
-    now = datetime.now().timestamp()
-
-    if user_id in ADMIN_IDS:  # 👑 Admin bypass
-        return False, 0
-
-    if user_id not in user_cooldowns:
-        user_cooldowns[user_id] = {}
-
-    last_time = user_cooldowns[user_id].get(command, 0)
-
-    if now - last_time < cooldown:
-        remaining = int(cooldown - (now - last_time))
-        return True, remaining
-
-    user_cooldowns[user_id][command] = now
-    return False, 0
+# Cooldown logic
 
 
-# ===== ATTACK COMMAND =====
+async def check_cooldown(user_id: int) -> Optional[int]:
+    """
+    Returns remaining cooldown in seconds if user is still on cooldown.
+    Otherwise, returns None.
+    """
+    now = datetime.utcnow()
+    last_attack = user_last_attack.get(user_id)
+    if last_attack:
+        elapsed = (now - last_attack).total_seconds()
+        if elapsed < GLOBAL_COOLDOWN:
+            return int(GLOBAL_COOLDOWN - elapsed)
+    return None
+
+async def setcooldown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Admin command to set global cooldown
+    Usage: /setcooldown <seconds>
+    """
+    global GLOBAL_COOLDOWN
+    user_id = update.effective_user.id
+
+    # Admin only
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Only admin can set cooldown.")
+        return
+
+    if len(context.args) != 1:
+        await update.message.reply_text("❌ Usage: /setcooldown <seconds>")
+        return
+
+    try:
+        seconds = int(context.args[0])
+        if seconds < 1 or seconds > 3600:
+            await update.message.reply_text("❌ Cooldown must be between 1 and 3600 seconds.")
+            return
+        GLOBAL_COOLDOWN = seconds
+        await update.message.reply_text(f"✅ Global cooldown set to {GLOBAL_COOLDOWN} seconds.")
+    except:
+        await update.message.reply_text("❌ Invalid number.")
+
+
+# Usage inside your attack command
 async def attack_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
-    # ✅ Approval check
+    # --- cooldown check ---
+    remaining = await check_cooldown(user_id)
+    if remaining:
+        await update.message.reply_text(f"⏱ You are on cooldown. Please wait {remaining} seconds before next attack.")
+        return
+    # --- end cooldown check ---
+
+    # Your existing attack logic here
+    ip = context.args[0]
+    port = int(context.args[1])
+    duration = int(context.args[2])
+
+    # ... attack processing ...
+
+    # Set last attack time for cooldown
+    user_last_attack[user_id] = datetime.utcnow()
+
+
+
+async def attack_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Attack command: /attack ip port duration"""
+    user_id = update.effective_user.id
+    
+    # Check if user is approved
     if not await is_user_approved(user_id):
         await update.message.reply_text(
             "❌ Access Denied!\n\n"
-            "Your account is not approved or expired."
+            "Your account is not approved or has expired.\n"
+            "Please contact the administrator."
         )
         return
-
-    # 🔥 Cooldown + Feedback button
-    on_cd, remaining = check_cooldown(user_id, "attack", 60)
-    if on_cd:
-        keyboard = [
-            [InlineKeyboardButton("📩 Send Feedback", callback_data="feedback")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await update.message.reply_text(
-            f"⏳ Cooldown Active!\n\n"
-            f"Try again after {remaining} sec\n\n"
-            f"Click below if issue 👇",
-            reply_markup=reply_markup
-        )
-        return
-
-    # ✅ Argument check
+    
+    # Check arguments
     if len(context.args) != 3:
         blocked_ports_str = get_blocked_ports_list()
         await update.message.reply_text(
-            f"❌ Usage:\n/attack ip port duration\n\n"
+            f"❌ Usage: /attack ip port duration\n\n"
+            f"Example: /attack 192.168.1.1 80 60\n\n"
+            f"Parameters:\n"
+            f"• ip - Target IP address\n"
+            f"• port - Port number (1-65535)\n"
+            f"• duration - Attack duration in seconds (1-200)\n\n"
             f"🚫 Blocked Ports: {blocked_ports_str}"
         )
         return
-
-    ip, port, duration = context.args
-
-    await update.message.reply_text(
-        f"🚀 Attack Started\nIP: {ip}\nPort: {port}\nTime: {duration}s"
-    )
-
-
-# ===== FEEDBACK BUTTON =====
-async def feedback_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    await query.message.reply_text("✍️ Apna feedback bhejo:")
-    context.user_data["waiting_feedback"] = True
-
-
-# ===== FEEDBACK RECEIVE =====
-async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("waiting_feedback"):
-        user = update.effective_user
-        msg = update.message.text
-
-        for admin_id in ADMIN_IDS:
-            await context.bot.send_message(
-                admin_id,
-                f"📩 Feedback\nUser: {user.id}\nMsg: {msg}"
-            )
-
-        await update.message.reply_text("✅ Feedback sent!")
-        context.user_data["waiting_feedback"] = False
-
-    # 👇 Yahan tumhara existing attack logic continue hoga
     
     ip = context.args[0]
     port_str = context.args[1]
@@ -805,9 +813,9 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Validate duration
     try:
         duration = int(duration_str)
-        if duration < 1 or duration > 150:  # Max 5 minutes
+        if duration < 1 or duration > 200:  # Max 5 minutes
             await update.message.reply_text(
-                "❌ Invalid duration. Must be between 1 and 150 seconds (5 minutes)."
+                "❌ Invalid duration. Must be between 1 and 200 seconds (5 minutes)."
             )
             return
     except ValueError:
@@ -1026,6 +1034,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message += "🔹 /running - Check running attacks\n"
         message += "🔹 /stats - View bot statistics\n"
         message += "🔹 /blockedports - Show blocked ports (admin)\n"
+        message += "🔹 /setcooldown <seconds>\n"
+
     
     message += "\n⚠️ Disclaimer: Misuse of this bot will result in immediate ban."
     
@@ -1053,7 +1063,7 @@ def main():
     application.add_handler(CommandHandler("users", users_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("blockedports", blocked_ports_command))
-    
+application.add_handler(CommandHandler("setcooldown", setcooldown_command))
     # User commands
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
@@ -1062,9 +1072,8 @@ def main():
     application.add_handler(CommandHandler("myinfo", myinfo_command))
     application.add_handler(CommandHandler("mystats", mystats_command))
     application.add_handler(CommandHandler("blockedports", blocked_ports_user_command))
-    application.add_handler(CallbackQueryHandler(feedback_button, pattern="feedback"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_feedback))
     
+    # Error handler
     application.add_error_handler(error_handler)
     
     # Start bot
