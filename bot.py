@@ -1064,7 +1064,7 @@ def main():
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("blockedports", blocked_ports_command))
     # User commands
-    
+    application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("attack", attack_command))
     application.add_handler(CommandHandler("myattacks", myattacks_command))
